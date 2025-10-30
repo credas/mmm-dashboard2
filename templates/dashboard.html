@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>MMM Dashboard</title>
+    <style>
+        body {
+            font-family: monospace;
+            margin: 20px;
+            background: white;
+            color: black;
+        }
+        table {
+            border-collapse: collapse;
+            width: 100%;
+            max-width: 600px;
+        }
+        td, th {
+            text-align: left;
+            padding: 8px;
+        }
+        th {
+            font-weight: bold;
+        }
+        .number {
+            text-align: right;
+        }
+        .header {
+            margin-bottom: 30px;
+        }
+        .total {
+            margin-top: 20px;
+            font-weight: bold;
+        }
+        .model-info {
+            margin-bottom: 20px;
+        }
+        h2 {
+            margin-top: 40px;
+            margin-bottom: 20px;
+            font-size: 18px;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>{{ model_config.model_info.title or "Media ROAS Dashboard" }}</h1>
+        <div class="model-info">
+            Client: {{ model_config.model_info.client }}<br>
+            Model: {{ model_id }}<br>
+            Date Range: {{ model_metrics.date_from }} to {{ model_metrics.date_to }}<br>
+            R²: {{ "%.4f"|format(model_metrics.r2) }}<br>
+            NRMSE: {{ "%.4f"|format(model_metrics.nrmse) }}<br>
+            KPI: {{ model_config.kpi.description }}
+        </div>
+    </div>
+
+    <table>
+        <thead>
+            <tr>
+                <th>Channel</th>
+                <th class="number">Investment</th>
+                <th class="number">ROAS</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for media in media_data %}
+            <tr>
+                <td>{{ media.channel }}</td>
+                <td class="number">{{ "%.2f"|format(media.investment) }}</td>
+                <td class="number">{{ "%.2f"|format(media.roas) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="total">
+        Total Investment: {{ "%.2f"|format(total_investment) }}
+    </div>
+
+    <h2>Media Channel Details</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Channel</th>
+                <th>Name</th>
+                <th>Approach</th>
+                <th>Type</th>
+                <th>Description</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for channel, details in model_config.media_spend.items() %}
+            <tr>
+                <td>{{ channel }}</td>
+                <td>{{ details.name }}</td>
+                <td>{{ details.approach }}</td>
+                <td>{{ details.media_type }}</td>
+                <td>{{ details.description }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h2>Contribution Analysis by Groups</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Category</th>
+                <th class="number">Contribution %</th>
+            </tr>
+        </thead>
+        <tbody>
+            <!-- Our Media -->
+            <tr style="font-weight: bold;">
+                <td>Our Media</td>
+                <td class="number">{{ "%.1f"|format(grouped_contributions.our_media.total) }}%</td>
+            </tr>
+            <tr>
+                <td style="padding-left: 20px;">AWARENESS</td>
+                <td class="number">{{ "%.1f"|format(grouped_contributions.our_media.awareness.total) }}%</td>
+            </tr>
+            {% for channel, data in grouped_contributions.our_media.awareness.channels.items() %}
+            <tr>
+                <td style="padding-left: 40px;">{{ data.name }}: {{ "%.1f"|format(data.contribution) }}%</td>
+                <td class="number"></td>
+            </tr>
+            {% endfor %}
+            <tr>
+                <td style="padding-left: 20px;">PERFORMANCE</td>
+                <td class="number">{{ "%.1f"|format(grouped_contributions.our_media.performance.total) }}%</td>
+            </tr>
+            {% for channel, data in grouped_contributions.our_media.performance.channels.items() %}
+            <tr>
+                <td style="padding-left: 40px;">{{ data.name }}: {{ "%.1f"|format(data.contribution) }}%</td>
+                <td class="number"></td>
+            </tr>
+            {% endfor %}
+            
+            <!-- Competition -->
+            <tr style="font-weight: bold;">
+                <td>Competition</td>
+                <td class="number">{{ "%.1f"|format(grouped_contributions.competition.total) }}%</td>
+            </tr>
+            {% for name, contribution in grouped_contributions.competition.competitors.items() %}
+            <tr>
+                <td style="padding-left: 20px;">{{ name }}</td>
+                <td class="number">{{ "%.1f"|format(contribution) }}%</td>
+            </tr>
+            {% endfor %}
+            
+            <!-- Base Sales -->
+            <tr style="font-weight: bold;">
+                <td>Base Sales</td>
+                <td class="number">{{ "%.1f"|format(grouped_contributions.base_sales.total) }}%</td>
+            </tr>
+            <tr>
+                <td style="padding-left: 20px;">Base (Intercept + Trend)</td>
+                <td class="number">{{ "%.1f"|format(grouped_contributions.base_sales.base) }}%</td>
+            </tr>
+            <tr>
+                <td style="padding-left: 20px;">Season (Seasonality + Holiday)</td>
+                <td class="number">{{ "%.1f"|format(grouped_contributions.base_sales.season) }}%</td>
+            </tr>
+            
+            <!-- Context -->
+            <tr style="font-weight: bold;">
+                <td>Context</td>
+                <td class="number">{{ "%.1f"|format(grouped_contributions.context.total) }}%</td>
+            </tr>
+            {% for var, data in grouped_contributions.context.variables.items() %}
+            <tr>
+                <td style="padding-left: 20px;">{{ data.name }}</td>
+                <td class="number">{{ "%.1f"|format(data.contribution) }}%</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h2>All Model Variables</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Variable</th>
+                <th class="number">Contribution %</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for var in all_variables %}
+            <tr>
+                <td>{{ var.variable }}</td>
+                <td class="number">{{ "%.2f"|format(var.contribution) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h2>Actual vs Predicted KPI (Last 20 weeks)</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Date</th>
+                <th class="number">Actual</th>
+                <th class="number">Predicted</th>
+                <th class="number">Difference</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for kpi in kpi_data %}
+            <tr>
+                <td>{{ kpi.date }}</td>
+                <td class="number">{{ "%.0f"|format(kpi.actual) }}</td>
+                <td class="number">{{ "%.0f"|format(kpi.predicted) }}</td>
+                <td class="number">{{ "%.0f"|format(kpi.predicted - kpi.actual) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h2>Media ROI Curves</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Channel</th>
+                <th class="number">50%</th>
+                <th class="number">75%</th>
+                <th class="number">100% (Current)</th>
+                <th class="number">125%</th>
+                <th class="number">150%</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for curve in roi_curves %}
+            <tr>
+                <td>{{ curve.channel }}</td>
+                {% for level in curve.levels %}
+                <td class="number">{{ "%.2f"|format(level.roi) }}</td>
+                {% endfor %}
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div style="margin-top: 10px; font-size: 12px;">
+        * Values show ROAS at different spending levels (50%-150% of current spend)
+    </div>
+
+    <h2>Yearly Investment & Returns</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Year</th>
+                <th class="number">Investment</th>
+                <th class="number">Return</th>
+                <th class="number">ROI</th>
+                <th class="number">Inv YoY %</th>
+                <th class="number">Ret YoY %</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for year in yearly_data %}
+            <tr>
+                <td>{{ year.year }}</td>
+                <td class="number">{{ "%.0f"|format(year.investment) }}</td>
+                <td class="number">{{ "%.0f"|format(year.return) }}</td>
+                <td class="number">{{ "%.2f"|format(year.roi) }}</td>
+                <td class="number">{{ "%+.1f"|format(year.inv_change) if year.inv_change != 0 else "-" }}</td>
+                <td class="number">{{ "%+.1f"|format(year.ret_change) if year.ret_change != 0 else "-" }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h2>Monthly Competition Pressure & Performance</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Month</th>
+                <th class="number">Our Investment</th>
+                {% set first_month = monthly_pressure_data[0] if monthly_pressure_data else {} %}
+                {% if first_month %}
+                    {% for comp_name in first_month.competitor_pressure.keys() %}
+                    <th class="number">{{ comp_name }}</th>
+                    {% endfor %}
+                {% endif %}
+                <th class="number">Total Comp.</th>
+                <th class="number">Actual KPI</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for month_data in monthly_pressure_data %}
+            <tr>
+                <td>{{ month_data.month }}</td>
+                <td class="number">{{ "%.0f"|format(month_data.our_investment) }}</td>
+                {% if first_month %}
+                    {% for comp_name in first_month.competitor_pressure.keys() %}
+                    <td class="number">{{ "%.0f"|format(month_data.competitor_pressure.get(comp_name, 0)) }}</td>
+                    {% endfor %}
+                {% endif %}
+                <td class="number">{{ "%.0f"|format(month_data.total_comp_pressure) }}</td>
+                <td class="number">{{ "%.0f"|format(month_data.kpi_actual) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div style="margin-top: 10px; font-size: 12px;">
+        * Competition pressure measured in GRPs/impressions. Last 12 months shown.
+    </div>
+
+    <h2>Trend Analysis by Year</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Year</th>
+                <th class="number">Total KPI</th>
+                <th class="number">Trend Contribution</th>
+                <th class="number">Trend %</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for trend in trend_analysis %}
+            <tr>
+                <td>{{ trend.year }}</td>
+                <td class="number">{{ "%.0f"|format(trend.total_kpi) }}</td>
+                <td class="number">{{ "%.0f"|format(trend.total_trend) }}</td>
+                <td class="number">{{ "%+.1f"|format(trend.trend_pct) }}%</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div style="margin-top: 10px; font-size: 12px;">
+        * Trend % shows the long-term growth/decline component as percentage of total KPI
+    </div>
+
+    <h2>Natural Seasonality (Weekly)</h2>
+    <table style="max-height: 300px; overflow-y: auto; display: block;">
+        <thead>
+            <tr>
+                <th>Week</th>
+                <th class="number">Seasonality Index</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for week in seasonality_data[:20] %}
+            <tr>
+                <td>Week {{ week.week }}</td>
+                <td class="number">{{ "%.0f"|format(week.seasonality) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div style="margin-top: 10px; font-size: 12px;">
+        * Showing first 20 weeks. Includes seasonal and holiday effects.
+    </div>
+
+    <h2>Spend Share vs Effect Share</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Channel</th>
+                <th class="number">Spend Share %</th>
+                <th class="number">Effect Share %</th>
+                <th class="number">Efficiency</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in spend_contrib_data %}
+            <tr>
+                <td>{{ item.channel }}</td>
+                <td class="number">{{ "%.1f"|format(item.spend_share) }}</td>
+                <td class="number">{{ "%.1f"|format(item.effect_share) }}</td>
+                <td class="number">{{ "%.2f"|format(item.efficiency) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div style="margin-top: 10px; font-size: 12px;">
+        * Efficiency > 1 means channel is more effective than its spend share
+    </div>
+
+    <h2>Media ROI Confidence Intervals</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Channel</th>
+                <th class="number">ROI Mean</th>
+                <th class="number">CI Low</th>
+                <th class="number">CI High</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in ci_data %}
+            <tr>
+                <td>{{ item.channel }}</td>
+                <td class="number">{{ "%.2f"|format(item.roi_mean) }}</td>
+                <td class="number">{{ "%.2f"|format(item.ci_low) }}</td>
+                <td class="number">{{ "%.2f"|format(item.ci_up) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h2>Immediate vs Carryover Effects</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Channel</th>
+                <th class="number">Immediate %</th>
+                <th class="number">Carryover %</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in carryover_data %}
+            <tr>
+                <td>{{ item.channel }}</td>
+                <td class="number">{{ "%.1f"|format(item.immediate) }}</td>
+                <td class="number">{{ "%.1f"|format(item.carryover) }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <h2>Media Response Decay ({{ adstock_type }})</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Channel</th>
+                <th class="number">Week 1</th>
+                <th class="number">Week 2</th>
+                <th class="number">Week 3</th>
+                <th class="number">Week 4</th>
+                <th class="number">Total Month 1</th>
+                <th class="number">Other Months</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in adstock_data %}
+            <tr>
+                <td>{{ item.channel }}</td>
+                <td class="number">{{ "%.1f"|format(item.week1) }}%</td>
+                <td class="number">{{ "%.1f"|format(item.week2) }}%</td>
+                <td class="number">{{ "%.1f"|format(item.week3) }}%</td>
+                <td class="number">{{ "%.1f"|format(item.week4) }}%</td>
+                <td class="number">{{ "%.1f"|format(item.month1_total) }}%</td>
+                <td class="number">{{ "%.1f"|format(item.other_months) }}%</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <div style="margin-top: 10px; font-size: 12px;">
+        * Shows percentage of total media effect realized in each time period
+    </div>
+</body>
+</html>

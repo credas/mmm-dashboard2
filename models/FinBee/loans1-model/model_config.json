@@ -1,0 +1,144 @@
+{
+  "model_info": {
+    "title": "Issued loans (business) by FinBee",
+    "client": "FinBee",
+    "model_id": "3_329_5",
+    "description": "Marketing Mix Model for business loan issuance"
+  },
+  
+  "kpi": {
+    "variable": "bloans_eur",
+    "name": "Business Loans",
+    "description": "Issued loans for business clients in EUR",
+    "unit": "EUR"
+  },
+  
+  "media_spend": {
+    "TV": {
+      "name": "Television",
+      "approach": "AWARENESS",
+      "media_type": "ATL",
+      "description": "Net investments into TV media",
+      "impressions_var": "FINBEE_TV_VERSLAS_GRP",
+      "impressions_desc": "GRPs for TV spend"
+    },
+    "TV2": {
+      "name": "Television 2",
+      "approach": "AWARENESS", 
+      "media_type": "ATL",
+      "description": "Net investments into TV2 media",
+      "impressions_var": null,
+      "impressions_desc": null
+    },
+    "RADIO": {
+      "name": "Radio",
+      "approach": "AWARENESS",
+      "media_type": "ATL", 
+      "description": "Net investments into radio media",
+      "impressions_var": "FINBEE_RADIO_VERSLAS_GRP",
+      "impressions_desc": "GRPs for radio spend"
+    },
+    "RADIO2": {
+      "name": "Radio 2",
+      "approach": "AWARENESS",
+      "media_type": "ATL",
+      "description": "Net investments into radio2 media", 
+      "impressions_var": null,
+      "impressions_desc": null
+    },
+    "META": {
+      "name": "Meta (Facebook/Instagram)",
+      "approach": "PERFORMANCE",
+      "media_type": "DIGITAL",
+      "description": "Net investments into Meta platforms",
+      "impressions_var": null,
+      "impressions_desc": null
+    },
+    "GADS": {
+      "name": "Google Ads",
+      "approach": "PERFORMANCE",
+      "media_type": "DIGITAL",
+      "description": "Net investments into Google Ads",
+      "impressions_var": null,
+      "impressions_desc": null
+    },
+    "YT": {
+      "name": "YouTube",
+      "approach": "AWARENESS",
+      "media_type": "DIGITAL", 
+      "description": "Net investments into YouTube ads",
+      "impressions_var": null,
+      "impressions_desc": null
+    }
+  },
+  
+  "competitors": {
+    "SAVY_TV_VERSLAS_GRP": {
+      "name": "SAVY",
+      "group": "KEY",
+      "type": "ALLMEDIA",
+      "description": "Savy competitor TV GRPs"
+    },
+    "SAVY_RADIO_VERSLAS_GRP": {
+      "name": "PK", 
+      "group": "KEY",
+      "type": "ALLMEDIA",
+      "description": "Savy competitor radio GRPs"
+    },
+    "BIGBANK_RADIO_VERSLAS_GRP": {
+      "name": "SP.BANKS",
+      "group": "KEY",
+      "type": "ALLMEDIA",
+      "description": "Specialisted banks competitor"
+    },
+    "SWEDBANK_RADIO_VERSLAS_GRP": {
+      "name": "BANKS",
+      "group": "OTHER",
+      "type": "ALLMEDIA",
+      "description": "Banks competition"
+    }
+  },
+  
+  "context_variables": {
+    "Temperatura.men.": {
+      "name": "Temperature",
+      "short_name": "TEMP",
+      "description": "Average weekly temperature",
+      "unit": "°C"
+    },
+    "Euribor": {
+      "name": "Euribor Rate", 
+      "short_name": "ERBR",
+      "description": "Euribor for loans rate, weekly",
+      "unit": "%"
+    },
+    "trend": {
+      "name": "Trend",
+      "short_name": "TREND",
+      "description": "Long-term trend component",
+      "unit": null
+    },
+    "season": {
+      "name": "Seasonality",
+      "short_name": "SEASON", 
+      "description": "Seasonal patterns",
+      "unit": null
+    },
+    "holiday": {
+      "name": "Holidays",
+      "short_name": "HOLIDAY",
+      "description": "Holiday effects",
+      "unit": null
+    }
+  },
+  
+  "variable_groups": {
+    "awareness_media": ["TV", "TV2", "RADIO", "RADIO2", "YT"],
+    "performance_media": ["META", "GADS"],
+    "atl_media": ["TV", "TV2", "RADIO", "RADIO2"],
+    "digital_media": ["META", "GADS", "YT"],
+    "key_competitors": ["SAVY_TV_VERSLAS_GRP", "SAVY_RADIO_VERSLAS_GRP", "BIGBANK_RADIO_VERSLAS_GRP"],
+    "prophet_vars": ["trend", "season", "holiday"],
+    "external_factors": ["Temperatura.men.", "Euribor"]
+  }
+}
