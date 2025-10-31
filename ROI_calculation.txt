@@ -1,0 +1,166 @@
+# ROI/ROAS Calculation in Robyn MMM Dashboard
+
+This document explains how Return on Investment (ROI) or Return on Ad Spend (ROAS) is calculated for media channels in the Robyn Marketing Mix Model.
+
+## Overview
+
+The calculation follows Robyn's full transformation pipeline:
+1. **Raw Spend** → **Adstock Transformation** → **Saturation Transformation** → **Response**
+2. **ROAS = Response / Raw Spend**
+
+### Transformation Pipeline
+
+```
+Raw Spend → [×Adstock Multiplier] → Adstocked Spend → [Hill Saturation] → Response → [÷Raw Spend] → ROI
+```
+
+## Data Sources
+
+### 1. Model Parameters (from `pareto_hyperparameters.csv`)
+- **{channel}_alphas**: Hill saturation shape parameter
+- **{channel}_gammas**: Normalized gamma (not used directly)
+- **{channel}_inflexion**: Actual inflexion point for Hill saturation
+- **{channel}_scales**: Weibull scale for adstock
+- **{channel}_shapes**: Weibull shape for adstock
+
+### 2. Model Coefficients (from `pareto_aggregated.csv`)
+- **coef**: Linear coefficient applied to saturated value
+- **mean_spend**: Average weekly raw spend
+- **mean_spend_adstocked**: Average weekly adstocked spend
+- **mean_response**: Average weekly response (KPI contribution)
+
+## Step-by-Step Calculation
+
+### Step 1: Calculate Adstock Multiplier
+Instead of recalculating the Weibull CDF transformation, we use the pre-calculated ratio:
+```
+Adstock Multiplier = mean_spend_adstocked / mean_spend
+```
+
+This multiplier represents the cumulative effect of ad carryover over time.
+
+### Step 2: Apply Adstock to Raw Spend
+```
+Adstocked Spend = Raw Spend × Adstock Multiplier
+```
+
+### Step 3: Apply Hill Saturation
+The Hill function models diminishing returns as spend increases:
+```
+Saturation = (x^α) / (x^α + K^α)
+
+Where:
+- x = Adstocked Spend
+- α = Alpha (shape parameter from hyperparameters)
+- K = Inflexion point (from hyperparameters)
+```
+
+### Step 4: Calculate Response
+```
+Response = Coefficient × Saturation
+
+Where:
+- Coefficient is from pareto_aggregated.csv
+```
+
+### Step 5: Calculate ROAS
+```
+ROAS = Response / Raw Spend
+```
+
+## Example: TV at 2800 spend
+
+### Parameters:
+- Coefficient: 174236.51
+- Mean spend (raw): 2654.86
+- Mean spend adstocked: 6618.49
+- Alpha: 1.0679
+- Inflexion: 7556.50
+
+### Calculation:
+1. Adstock Multiplier = 6618.49 / 2654.86 = 2.493
+2. Adstocked Spend = 2800 × 2.493 = 6980.34
+3. Saturation = (6980.34^1.0679) / (6980.34^1.0679 + 7556.50^1.0679) = 0.4788
+4. Response = 174236.51 × 0.4788 = 83,431.09
+5. ROAS = 83,431.09 / 2800 = 29.80
+
+## Key Points
+
+1. **Adstock Effect**: Captures the carryover effect of advertising over time using Weibull CDF
+2. **Saturation Effect**: Models diminishing returns using Hill transformation
+3. **Linear Coefficient**: Scales the saturated value to actual KPI units
+4. **ROAS**: Always calculated as Response / Raw Spend (not adstocked spend)
+
+## Common Adstock Multipliers (Model 3_329_5)
+- TV: 2.49x
+- TV2: 5.02x
+- RADIO: 1.94x
+- RADIO2: 2.41x
+- META: 1.39x
+- GADS: 5.04x
+- YT: 3.54x
+
+These multipliers show how much the immediate spend effect is amplified over time due to carryover.
+
+## Notes on Calculation Variations
+
+The exact ROAS values may vary depending on:
+1. **Model version**: Different Robyn versions may handle transformations slightly differently
+2. **Optimization context**: Budget optimization may use different response curves than historical fitting
+3. **Time aggregation**: Weekly vs daily transformations can affect results
+4. **Coefficient interpretation**: Some implementations may apply additional scaling factors
+
+For model 3_329_5, the mean ROAS values from pareto_aggregated.csv are:
+- TV: 29.05
+- TV2: 4.59
+- RADIO: 60.78
+- META: 45.08
+- GADS: 25.83
+
+## Alternative Calculation: ROI2 (Weekly Simulation Method)
+
+ROI2 uses a weekly simulation approach that models how advertising spend decays over time:
+
+### Method Overview
+1. **Distribute spend** across weeks using Weibull decay pattern
+2. **Apply saturation** to each week's total adstocked spend
+3. **Sum responses** across all weeks
+4. **Calculate ROI2** = Total Response / Total Raw Spend
+
+### Key Differences from Simple ROI
+- **Simple ROI**: Applies saturation to the average adstocked spend (one calculation)
+- **ROI2**: Applies saturation to each week's adstocked total (multiple calculations)
+
+### Implementation Details
+
+The adstock multiplier is decomposed as:
+```
+Adstock Multiplier = 1.0 (immediate) + Carryover Effect
+```
+
+For each week of spend:
+1. Add immediate effect (1.0 × spend) to that week
+2. Distribute carryover effect across future weeks using Weibull CDF
+3. Apply Hill saturation to each week's total adstocked spend
+4. Sum all weekly responses
+
+This method captures the time-varying nature of saturation as adstock accumulates and decays.
+
+## Example Calculations (Model 3_329_5)
+
+### Weekly Spend Analysis
+
+| Channel | Raw Spend | Adstock Mult | Adstocked | Saturation | KPI Return | ROI  |
+|---------|-----------|--------------|-----------|------------|------------|------|
+| TV      | 2,800     | 2.493x       | 6,980     | 47.9%      | 83,431     | 29.8 |
+| TV2     | 1,400     | 5.016x       | 7,023     | 12.6%      | 5,239      | 3.7  |
+| RADIO   | 820       | 1.937x       | 1,588     | 13.8%      | 51,744     | 63.1 |
+| META    | 590       | 1.393x       | 822       | 21.3%      | 23,242     | 39.4 |
+| GADS    | 880       | 5.040x       | 4,435     | 61.6%      | 19,620     | 22.3 |
+
+### Key Metrics Explained
+
+- **Adstock Multiplier**: Pre-calculated from `mean_spend_adstocked / mean_spend`
+- **Saturation %**: Indicates diminishing returns (higher % = less room for growth)
+- **KPI Return**: `Coefficient × Saturation`
+- **ROI**: `KPI Return / Raw Spend`

@@ -1,0 +1,587 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Media Budget Optimization - MMM Dashboard</title>
+    <style>
+        body {
+            font-family: monospace;
+            margin: 20px;
+            background: white;
+            color: black;
+        }
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .budget-constraints {
+            font-size: 14px;
+        }
+        .budget-constraints th {
+            font-size: 12px;
+        }
+        h1, h2 {
+            margin-bottom: 20px;
+        }
+        .form-section {
+            border: 1px solid #000;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .date-inputs {
+            margin-bottom: 20px;
+        }
+        .date-inputs input {
+            margin-right: 20px;
+            padding: 5px;
+        }
+        .budget-constraints {
+            margin-top: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        th, td {
+            padding: 8px;
+            text-align: left;
+            border-bottom: 1px solid #000;
+        }
+        th {
+            font-weight: bold;
+        }
+        .number {
+            text-align: right;
+        }
+        input[type="number"] {
+            width: 80px;
+            padding: 5px;
+        }
+        .btn {
+            background: #000;
+            color: #fff;
+            padding: 10px 20px;
+            border: none;
+            cursor: pointer;
+            margin-top: 20px;
+        }
+        .btn:hover {
+            background: #333;
+        }
+        .results-section {
+            display: none;
+            margin-top: 40px;
+        }
+        .results-header {
+            display: flex;
+            gap: 40px;
+            margin-bottom: 30px;
+        }
+        .result-box {
+            flex: 1;
+            border: 1px solid #000;
+            padding: 20px;
+        }
+        .result-title {
+            font-size: 18px;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        .metric {
+            margin: 5px 0;
+        }
+        .bar-chart {
+            display: flex;
+            gap: 20px;
+            margin: 20px 0;
+            align-items: flex-end;
+            height: 200px;
+        }
+        .bar-group {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-end;
+        }
+        .bar {
+            width: 100%;
+            background: #ccc;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-end;
+            position: relative;
+        }
+        .bar-value {
+            position: absolute;
+            top: -20px;
+            font-size: 14px;
+        }
+        .bar-label {
+            margin-top: 10px;
+            font-size: 12px;
+        }
+        .optimized .bar {
+            background: #6495ED;
+        }
+        .loading {
+            display: none;
+            text-align: center;
+            padding: 40px;
+        }
+        .nav-links {
+            margin-bottom: 20px;
+        }
+        .nav-links a {
+            margin-right: 20px;
+            color: #000;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="nav-links">
+            <a href="/">← Back to Dashboard</a>
+        </div>
+        
+        <h1>Media Budget Optimization</h1>
+        
+        <div class="form-section">
+            <h2>Select Optimization Period</h2>
+            <div class="date-inputs">
+                <label>Start Date: <input type="date" id="start_date" min="{{ date_min }}" max="{{ date_max }}" value="{{ date_min }}"></label>
+                <label>End Date: <input type="date" id="end_date" min="{{ date_min }}" max="{{ date_max }}" value="{{ date_max }}"></label>
+            </div>
+            
+            <h2>Budget Constraints (Weekly Average)</h2>
+            <table class="budget-constraints">
+                <thead>
+                    <tr>
+                        <th>Media Channel</th>
+                        <th>Current Avg Weekly</th>
+                        <th>Adstocked Spend</th>
+                        <th>Adstock Mult</th>
+                        <th>Saturation %</th>
+                        <th>ROI</th>
+                        <th>Adstocked Sum2<br><small>(Simulated)</small></th>
+                        <th>Saturated Sum2<br><small>(Response)</small></th>
+                        <th>ROI2</th>
+                        <th>Min Weekly</th>
+                        <th>Max Weekly</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for channel in media_channels %}
+                    {% if channel in avg_spends %}
+                    <tr>
+                        <td>{{ model_config.media_spend[channel].name or channel }}</td>
+                        <td class="number" id="avg_{{ channel }}">{{ "%.0f"|format(avg_spends[channel]) }}</td>
+                        <td class="number" id="adstocked_{{ channel }}">-</td>
+                        <td class="number" id="adstock_{{ channel }}">-</td>
+                        <td class="number" id="sat_{{ channel }}">-</td>
+                        <td class="number" id="roi_{{ channel }}">-</td>
+                        <td class="number" id="adstocked_sum2_{{ channel }}">-</td>
+                        <td class="number" id="saturated_sum2_{{ channel }}">-</td>
+                        <td class="number" id="roi2_{{ channel }}">-</td>
+                        <td class="number"><input type="number" id="min_{{ channel }}" value="{{ "%.0f"|format(avg_spends[channel] * 0.5) }}" min="0"></td>
+                        <td class="number"><input type="number" id="max_{{ channel }}" value="{{ "%.0f"|format(avg_spends[channel] * 1.5) }}"></td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                </tbody>
+            </table>
+            <p style="font-size: 12px; margin-top: 5px;">
+                * <strong>Adstocked Sum2</strong>: Total adstocked spend calculated by simulating weekly decay over the period + carryover<br>
+                * <strong>Saturated Sum2</strong>: Total response after applying saturation to each week's adstocked spend<br>
+                * <strong>ROI2</strong>: Saturated Sum2 / (Avg Weekly × N weeks) - More accurate when considering time-based decay<br>
+            </p>
+            
+            <button class="btn" onclick="runOptimization()">Run Optimization</button>
+            
+            <h2 style="margin-top: 40px;">Model Coefficients (Model {{ model_id }})</h2>
+            <table class="budget-constraints">
+                <thead>
+                    <tr>
+                        <th>Media Channel</th>
+                        <th>Regression<br>Coefficient</th>
+                        <th>Alpha<br>(α)</th>
+                        <th>Gamma<br>(γ)</th>
+                        <th>Scale<br>(Weibull)</th>
+                        <th>Shape<br>(Weibull)</th>
+                        <th>Adstock Formula</th>
+                    </tr>
+                </thead>
+                <tbody id="coefficients-tbody">
+                    <tr><td colspan="7" style="text-align: center;">Loading...</td></tr>
+                </tbody>
+            </table>
+            
+            <div style="margin-top: 20px; padding: 15px; border: 1px solid #000; background: #f8f8f8;">
+                <h3 style="margin-top: 0;">Adstock Multiplier Calculation Formula</h3>
+                <p style="font-family: monospace; margin: 10px 0;">
+                    <strong>Adstock Multiplier = mean_spend_adstocked / mean_spend</strong>
+                </p>
+                <p style="margin: 10px 0;">
+                    Where mean_spend_adstocked is pre-calculated using Weibull CDF transformation:
+                </p>
+                <p style="font-family: monospace; margin: 10px 0;">
+                    <strong>Weibull CDF(x) = 1 - exp(-(x/scale)^shape)</strong>
+                </p>
+                <p style="margin: 10px 0;">
+                    The adstock effect accumulates spend over time based on the decay pattern defined by the Weibull distribution parameters.
+                </p>
+            </div>
+        </div>
+        
+        <div class="loading">
+            <p>Running optimization...</p>
+        </div>
+        
+        <div class="results-section" id="results">
+            <h2>Total Budget Optimization Result (<span id="result-weeks"></span> weeks) | Scenario: max_response</h2>
+            
+            <div class="results-header">
+                <div class="result-box">
+                    <div class="result-title">Initial</div>
+                    <div class="metric">Spend: <span id="initial-spend-pct">0%</span></div>
+                    <div class="metric">Resp: <span id="initial-resp-pct">0%</span></div>
+                    <div class="metric">ROAS: <span id="initial-roas">0.00</span></div>
+                </div>
+                <div class="result-box">
+                    <div class="result-title">Bounded</div>
+                    <div class="metric">Spend: <span id="opt-spend-pct">0%</span></div>
+                    <div class="metric">Resp: <span id="opt-resp-pct">0%</span></div>
+                    <div class="metric">ROAS: <span id="opt-roas">0.00</span></div>
+                </div>
+            </div>
+            
+            <div class="bar-chart">
+                <div class="bar-group">
+                    <div class="bar" id="initial-spend-bar" style="height: 50%">
+                        <div class="bar-value" id="initial-spend-value">0</div>
+                    </div>
+                    <div class="bar-label">total spend</div>
+                </div>
+                <div class="bar-group">
+                    <div class="bar" id="initial-resp-bar" style="height: 50%">
+                        <div class="bar-value" id="initial-resp-value">0</div>
+                    </div>
+                    <div class="bar-label">total response</div>
+                </div>
+                <div class="bar-group">
+                    <div class="bar optimized" id="opt-spend-bar" style="height: 50%">
+                        <div class="bar-value" id="opt-spend-value">0</div>
+                    </div>
+                    <div class="bar-label">total spend</div>
+                </div>
+                <div class="bar-group">
+                    <div class="bar optimized" id="opt-resp-bar" style="height: 50%">
+                        <div class="bar-value" id="opt-resp-value">0</div>
+                    </div>
+                    <div class="bar-label">total response</div>
+                </div>
+            </div>
+            
+            <h2>Budget Allocation per Paid Media Variable per Week*</h2>
+            <table id="allocation-table">
+                <thead>
+                    <tr>
+                        <th rowspan="2">Paid Media</th>
+                        <th colspan="6" style="text-align: center;">Initial</th>
+                        <th colspan="6" style="text-align: center;">Optimized</th>
+                    </tr>
+                    <tr>
+                        <th class="number">abs.mean<br>spend</th>
+                        <th class="number">mean<br>spend%</th>
+                        <th class="number">mean<br>response</th>
+                        <th class="number">mean<br>ROAS</th>
+                        <th class="number">Sat%</th>
+                        <th class="number">mROAS</th>
+                        <th class="number">abs.mean<br>spend</th>
+                        <th class="number">mean<br>spend%</th>
+                        <th class="number">mean<br>response</th>
+                        <th class="number">mean<br>ROAS</th>
+                        <th class="number">Sat%</th>
+                        <th class="number">mROAS</th>
+                    </tr>
+                </thead>
+                <tbody id="allocation-tbody">
+                </tbody>
+            </table>
+            
+            <p style="font-size: 12px; margin-top: 10px;">
+                * Optimization maximizes total response within budget constraints using model coefficients and saturation curves
+            </p>
+        </div>
+    </div>
+    
+    <script>
+        // Update averages when dates change
+        function updateAverages() {
+            const startDate = document.getElementById('start_date').value;
+            const endDate = document.getElementById('end_date').value;
+            
+            if (!startDate || !endDate) return;
+            
+            fetch('/api/get_averages', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    start_date: startDate,
+                    end_date: endDate
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.channels) {
+                    // Update the current average display and metrics
+                    const channels = {{ media_channels | tojson }};
+                    const coeffTableBody = document.getElementById('coefficients-tbody');
+                    coeffTableBody.innerHTML = '';
+                    
+                    for (const channel of channels) {
+                        if (channel in data.channels) {
+                            const metrics = data.channels[channel];
+                            const avgCell = document.getElementById('avg_' + channel);
+                            const adstockedCell = document.getElementById('adstocked_' + channel);
+                            const adstockCell = document.getElementById('adstock_' + channel);
+                            const satCell = document.getElementById('sat_' + channel);
+                            const roiCell = document.getElementById('roi_' + channel);
+                            const adstockedSum2Cell = document.getElementById('adstocked_sum2_' + channel);
+                            const saturatedSum2Cell = document.getElementById('saturated_sum2_' + channel);
+                            const roi2Cell = document.getElementById('roi2_' + channel);
+                            const minInput = document.getElementById('min_' + channel);
+                            const maxInput = document.getElementById('max_' + channel);
+                            
+                            if (avgCell) {
+                                avgCell.textContent = Math.round(metrics.avg_spend);
+                            }
+                            if (adstockedCell) {
+                                adstockedCell.textContent = Math.round(metrics.adstocked_spend);
+                            }
+                            if (adstockCell) {
+                                adstockCell.textContent = metrics.adstock_mult + 'x';
+                            }
+                            if (satCell) {
+                                satCell.textContent = metrics.saturation_pct + '%';
+                            }
+                            if (roiCell) {
+                                roiCell.textContent = metrics.roi;
+                            }
+                            if (adstockedSum2Cell) {
+                                adstockedSum2Cell.textContent = Math.round(metrics.adstocked_sum2 || 0);
+                                adstockedSum2Cell.title = `Total adstocked spend over ${metrics.n_weeks} weeks + carryover`;
+                            }
+                            if (saturatedSum2Cell) {
+                                saturatedSum2Cell.textContent = Math.round(metrics.saturated_sum2 || 0);
+                                saturatedSum2Cell.title = 'Total saturated response including carryover effects';
+                            }
+                            if (roi2Cell) {
+                                roi2Cell.textContent = metrics.roi2 || '-';
+                                roi2Cell.title = 'ROI calculated with weekly simulation method';
+                            }
+                            if (minInput && maxInput) {
+                                minInput.value = Math.round(metrics.avg_spend * 0.5);
+                                maxInput.value = Math.round(metrics.avg_spend * 1.5);
+                            }
+                            
+                            // Add row to coefficients table
+                            const row = document.createElement('tr');
+                            row.innerHTML = `
+                                <td>${channel}</td>
+                                <td class="number">${metrics.coef ? metrics.coef.toFixed(2) : '-'}</td>
+                                <td class="number">${metrics.alpha ? metrics.alpha.toFixed(4) : '-'}</td>
+                                <td class="number">${metrics.gamma ? metrics.gamma.toFixed(2) : '-'}</td>
+                                <td class="number">${metrics.scale ? metrics.scale.toFixed(4) : '-'}</td>
+                                <td class="number">${metrics.shape ? metrics.shape.toFixed(4) : '-'}</td>
+                                <td class="number">${metrics.adstock_mult}x</td>
+                            `;
+                            coeffTableBody.appendChild(row);
+                        }
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Error updating averages:', error);
+            });
+        }
+        
+        // Add event listeners for date changes
+        document.getElementById('start_date').addEventListener('change', updateAverages);
+        document.getElementById('end_date').addEventListener('change', updateAverages);
+        
+        // Load initial data
+        updateAverages();
+        
+        function runOptimization() {
+            const startDate = document.getElementById('start_date').value;
+            const endDate = document.getElementById('end_date').value;
+            
+            if (!startDate || !endDate) {
+                alert('Please select both start and end dates');
+                return;
+            }
+            
+            // Collect budget constraints
+            const constraints = {};
+            const channels = {{ media_channels | tojson }};
+            const avgSpends = {{ avg_spends | tojson }};
+            
+            for (const channel of channels) {
+                if (channel in avgSpends) {
+                    const minInput = document.getElementById('min_' + channel);
+                    const maxInput = document.getElementById('max_' + channel);
+                    
+                    if (minInput && maxInput) {
+                        constraints[channel] = {
+                            min: parseFloat(minInput.value) || 0,
+                            max: parseFloat(maxInput.value) || 999999
+                        };
+                    }
+                }
+            }
+            
+            // Show loading
+            document.querySelector('.loading').style.display = 'block';
+            document.querySelector('.results-section').style.display = 'none';
+            
+            // Call API
+            fetch('/api/optimize', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    start_date: startDate,
+                    end_date: endDate,
+                    budget_constraints: constraints
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.error) {
+                    alert('Error: ' + data.error);
+                    return;
+                }
+                
+                displayResults(data);
+            })
+            .catch(error => {
+                alert('Error running optimization: ' + error);
+            })
+            .finally(() => {
+                document.querySelector('.loading').style.display = 'none';
+            });
+        }
+        
+        function displayResults(data) {
+            // Update header metrics
+            document.getElementById('result-weeks').textContent = data.period.weeks;
+            
+            document.getElementById('initial-spend-pct').textContent = '0%';
+            document.getElementById('initial-resp-pct').textContent = '0%';
+            document.getElementById('initial-roas').textContent = data.initial.total_roas.toFixed(2);
+            
+            document.getElementById('opt-spend-pct').textContent = data.lift.spend_change.toFixed(1) + '%';
+            document.getElementById('opt-resp-pct').textContent = '+' + data.lift.response_change.toFixed(1) + '%';
+            document.getElementById('opt-roas').textContent = data.optimized.total_roas.toFixed(2);
+            
+            // Format values
+            function formatValue(val) {
+                if (val >= 1000000) {
+                    return (val / 1000000).toFixed(2) + 'M';
+                } else if (val >= 1000) {
+                    return (val / 1000).toFixed(0) + 'K';
+                }
+                return val.toFixed(0);
+            }
+            
+            // Update bar chart
+            const maxValue = Math.max(
+                data.initial.total_spend,
+                data.initial.total_response,
+                data.optimized.total_spend,
+                data.optimized.total_response
+            );
+            
+            document.getElementById('initial-spend-bar').style.height = (data.initial.total_spend / maxValue * 100) + '%';
+            document.getElementById('initial-spend-value').textContent = formatValue(data.initial.total_spend);
+            
+            document.getElementById('initial-resp-bar').style.height = (data.initial.total_response / maxValue * 100) + '%';
+            document.getElementById('initial-resp-value').textContent = formatValue(data.initial.total_response);
+            
+            document.getElementById('opt-spend-bar').style.height = (data.optimized.total_spend / maxValue * 100) + '%';
+            document.getElementById('opt-spend-value').textContent = formatValue(data.optimized.total_spend);
+            
+            document.getElementById('opt-resp-bar').style.height = (data.optimized.total_response / maxValue * 100) + '%';
+            document.getElementById('opt-resp-value').textContent = formatValue(data.optimized.total_response);
+            
+            // Update allocation table
+            const tbody = document.getElementById('allocation-tbody');
+            tbody.innerHTML = '';
+            
+            // Map results by channel for easy lookup
+            const initialMap = {};
+            const optimizedMap = {};
+            
+            data.initial.results.forEach(r => { initialMap[r.channel] = r; });
+            data.optimized.results.forEach(r => { optimizedMap[r.channel] = r; });
+            
+            // Sort channels by initial spend descending
+            const sortedChannels = data.initial.results
+                .sort((a, b) => b.spend - a.spend)
+                .map(r => r.channel);
+            
+            const modelConfig = {{ model_config | tojson }};
+            
+            sortedChannels.forEach(channel => {
+                const init = initialMap[channel];
+                const opt = optimizedMap[channel];
+                const channelName = modelConfig.media_spend[channel]?.name || channel;
+                
+                const row = document.createElement('tr');
+                
+                // Apply background color for zero allocation
+                if (opt.weekly_spend === 0) {
+                    row.style.backgroundColor = '#ddd';
+                } else if (opt.weekly_spend > init.weekly_spend * 1.1) {
+                    row.style.backgroundColor = '#e6f3ff';
+                }
+                
+                // Calculate weekly response
+                const init_weekly_response = init.response / data.period.weeks;
+                const opt_weekly_response = opt.response / data.period.weeks;
+                
+                // Calculate marginal ROAS (difference in response / difference in spend)
+                const spend_diff = opt.spend - init.spend;
+                const response_diff = opt.response - init.response;
+                const mROAS = spend_diff !== 0 ? response_diff / spend_diff : 0;
+                
+                row.innerHTML = `
+                    <td>${channelName}</td>
+                    <td class="number">${init.weekly_spend.toFixed(0)}</td>
+                    <td class="number">${init.spend_pct.toFixed(1)}%</td>
+                    <td class="number">${init_weekly_response.toFixed(0)}</td>
+                    <td class="number">${init.roas.toFixed(1)}</td>
+                    <td class="number">${init.saturation ? init.saturation.toFixed(1) : '-'}</td>
+                    <td class="number">${init.roas.toFixed(2)}</td>
+                    <td class="number" style="background: rgba(100, 149, 237, 0.2);">${opt.weekly_spend.toFixed(0)}</td>
+                    <td class="number" style="background: rgba(100, 149, 237, 0.2);">${opt.spend_pct.toFixed(1)}%</td>
+                    <td class="number" style="background: rgba(100, 149, 237, 0.2);">${opt_weekly_response.toFixed(0)}</td>
+                    <td class="number" style="background: rgba(100, 149, 237, 0.2);">${opt.roas.toFixed(1)}</td>
+                    <td class="number" style="background: rgba(100, 149, 237, 0.2);">${opt.saturation ? opt.saturation.toFixed(1) : '-'}</td>
+                    <td class="number" style="background: rgba(100, 149, 237, 0.2);">${mROAS.toFixed(2)}</td>
+                `;
+                
+                tbody.appendChild(row);
+            });
+            
+            // Show results
+            document.querySelector('.results-section').style.display = 'block';
+        }
+    </script>
+</body>
+</html>

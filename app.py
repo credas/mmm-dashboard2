@@ -1,8 +1,10 @@
-from flask import Flask, render_template
+from flask import Flask, render_template, request, jsonify
 import pandas as pd
 import numpy as np
 from scipy.stats import weibull_min
+from scipy.optimize import minimize
 import os
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -513,6 +515,451 @@ def dashboard():
                          grouped_contributions=grouped_contributions,
                          monthly_pressure_data=monthly_pressure_data,
                          trend_analysis=trend_analysis)
+
+@app.route('/optimize')
+def optimize():
+    # Read raw data to get actual spend amounts
+    raw_df = pd.read_csv(f'{MODEL_DIR}/raw_data.csv')
+    
+    # Get date range from decomp data
+    decomp_df = pd.read_csv(DECOMP_PATH)
+    model_df = decomp_df[decomp_df['solID'] == MODEL_ID].copy()
+    
+    if model_df.empty:
+        return "No data found for model", 404
+    
+    # Get date range
+    date_min = model_df['ds'].min()
+    date_max = model_df['ds'].max()
+    
+    # Calculate average weekly spend for each media channel from raw data
+    avg_spends = {}
+    for channel in MEDIA_CHANNELS:
+        if channel in raw_df.columns:
+            avg_spends[channel] = raw_df[channel].mean()
+    
+    return render_template('optimize.html',
+                         date_min=date_min,
+                         date_max=date_max,
+                         media_channels=MEDIA_CHANNELS,
+                         avg_spends=avg_spends,
+                         model_config=model_config,
+                         model_id=MODEL_ID)
+
+@app.route('/api/get_averages', methods=['POST'])
+def get_averages():
+    data = request.json
+    start_date = data['start_date']
+    end_date = data['end_date']
+    
+    # Read raw data to get actual spend
+    raw_df = pd.read_csv(f'{MODEL_DIR}/raw_data.csv')
+    
+    # Filter by date range
+    mask = (raw_df['weekstart'] >= start_date) & (raw_df['weekstart'] <= end_date)
+    period_df = raw_df[mask]
+    
+    if period_df.empty:
+        return jsonify({'error': 'No data found for selected period'}), 400
+    
+    # Read model parameters for additional metrics
+    agg_df = pd.read_csv(MODEL_PATH)
+    media_df = agg_df[(agg_df['solID'] == MODEL_ID) & (agg_df['rn'].isin(MEDIA_CHANNELS))]
+    
+    hyper_df = pd.read_csv('models/FinBee/loans1-model/pareto_hyperparameters.csv')
+    hyper_row = hyper_df[hyper_df['solID'] == MODEL_ID].iloc[0] if not hyper_df[hyper_df['solID'] == MODEL_ID].empty else None
+    
+    
+    # Calculate metrics for each media channel
+    channel_metrics = {}
+    for channel in MEDIA_CHANNELS:
+        if channel in period_df.columns and channel in media_df['rn'].values:
+            avg_spend = float(period_df[channel].mean())
+            
+            # Get model parameters
+            channel_row = media_df[media_df['rn'] == channel].iloc[0]
+            mean_spend = float(channel_row['mean_spend'])
+            mean_spend_adstocked = float(channel_row['mean_spend_adstocked'])
+            coef = float(channel_row['coef'])
+            
+            # Calculate adstock multiplier
+            adstock_mult = mean_spend_adstocked / mean_spend if mean_spend > 0 else 1.0
+            
+            # Get hyperparameters
+            alpha = gamma = scale = shape = None
+            if hyper_row is not None:
+                alpha_col = f"{channel}_alphas"
+                inflexion_col = f"{channel}_inflexion"
+                scale_col = f"{channel}_scales"
+                shape_col = f"{channel}_shapes"
+                
+                if alpha_col in hyper_row:
+                    alpha = float(hyper_row[alpha_col])
+                if inflexion_col in hyper_row:
+                    gamma = float(hyper_row[inflexion_col])
+                if scale_col in hyper_row:
+                    scale = float(hyper_row[scale_col])
+                if shape_col in hyper_row:
+                    shape = float(hyper_row[shape_col])
+            
+            # Calculate saturation and ROI at average spend
+            adstocked_spend = avg_spend * adstock_mult
+            if alpha and gamma:
+                saturation = (adstocked_spend ** alpha) / (adstocked_spend ** alpha + gamma ** alpha)
+                response = coef * saturation
+                roi = response / avg_spend if avg_spend > 0 else 0
+            else:
+                saturation = 0
+                roi = 0
+            
+            # Calculate adstock2 and saturation2 using weekly simulation
+            adstocked_sum2 = 0
+            saturated_sum2 = 0
+            
+            if scale and shape and alpha and gamma:
+                # Simulate weekly adstock decay over selected period
+                n_weeks = len(period_df)
+                total_weeks = n_weeks + 52  # Include carryover weeks
+                
+                # Initialize array to store adstocked spend for each week
+                weekly_adstock = np.zeros(total_weeks)
+                
+                # Use scipy's Weibull distribution
+                from scipy.stats import weibull_min
+                
+                # Calculate carryover multiplier (total multiplier - immediate effect)
+                carryover_mult = adstock_mult - 1.0 if adstock_mult > 1.0 else 0.0
+                
+                # For each week of spend, add immediate effect + distribute carryover
+                for spend_week in range(n_weeks):
+                    # Immediate effect in the same week
+                    weekly_adstock[spend_week] += avg_spend * 1.0
+                    
+                    # Distribute carryover effects according to Weibull decay
+                    for lag in range(1, min(52, total_weeks - spend_week)):
+                        target_week = spend_week + lag
+                        
+                        # Get the portion of carryover for this lag
+                        cdf_current = weibull_min.cdf((lag + 1)/52, c=shape, scale=scale)
+                        cdf_previous = weibull_min.cdf(lag/52, c=shape, scale=scale)
+                        decay_portion = cdf_current - cdf_previous
+                        
+                        # Apply this portion of the total carryover
+                        carryover_amount = avg_spend * carryover_mult * decay_portion
+                        weekly_adstock[target_week] += carryover_amount
+                
+                # Sum total adstocked spend
+                adstocked_sum2 = np.sum(weekly_adstock)
+                
+                # Now apply saturation to each week's total adstocked spend
+                for week_idx, week_total in enumerate(weekly_adstock):
+                    if week_total > 0:
+                        # Apply saturation to the week's total adstocked spend
+                        week_saturation = (week_total ** alpha) / (week_total ** alpha + gamma ** alpha)
+                        week_response = coef * week_saturation
+                        saturated_sum2 += week_response
+                
+                # Calculate ROI2
+                roi2 = saturated_sum2 / (avg_spend * n_weeks) if avg_spend > 0 and n_weeks > 0 else 0
+            else:
+                roi2 = roi  # Fallback to simple ROI
+            
+            
+            channel_metrics[channel] = {
+                'avg_spend': avg_spend,
+                'adstocked_spend': round(adstocked_spend, 0),
+                'adstock_mult': round(adstock_mult, 3),
+                'saturation_pct': round(saturation * 100, 1),
+                'roi': round(roi, 1),
+                'coef': coef,
+                'alpha': alpha,
+                'gamma': gamma,
+                'scale': scale,
+                'shape': shape,
+                'adstocked_sum2': round(adstocked_sum2, 0),
+                'saturated_sum2': round(saturated_sum2, 0),
+                'roi2': round(roi2, 1),
+                'n_weeks': n_weeks if 'n_weeks' in locals() else len(period_df)
+            }
+    
+    return jsonify({
+        'channels': channel_metrics,
+        'weeks': len(period_df),
+        'total_spend': float(sum(period_df[ch].sum() for ch in MEDIA_CHANNELS if ch in period_df.columns))
+    })
+
+@app.route('/api/optimize', methods=['POST'])
+def run_optimization():
+    data = request.json
+    start_date = data['start_date']
+    end_date = data['end_date']
+    budget_constraints = data['budget_constraints']
+    
+    # Read both raw data (for spend) and decomp data (for model parameters)
+    raw_df = pd.read_csv(f'{MODEL_DIR}/raw_data.csv')
+    decomp_df = pd.read_csv(DECOMP_PATH)
+    model_df = decomp_df[decomp_df['solID'] == MODEL_ID].copy()
+    
+    # Filter raw data by date range for actual spend
+    raw_mask = (raw_df['weekstart'] >= start_date) & (raw_df['weekstart'] <= end_date)
+    raw_period_df = raw_df[raw_mask].copy()
+    
+    # Filter model data by date range for decomposition
+    model_mask = (model_df['ds'] >= start_date) & (model_df['ds'] <= end_date)
+    model_period_df = model_df[model_mask].copy()
+    
+    if raw_period_df.empty or model_period_df.empty:
+        return jsonify({'error': 'No data found for selected period'}), 400
+    
+    n_weeks = len(raw_period_df)
+    
+    # Read model parameters
+    agg_df = pd.read_csv(MODEL_PATH)
+    media_df = agg_df[(agg_df['solID'] == MODEL_ID) & (agg_df['rn'].isin(MEDIA_CHANNELS))]
+    
+    hyper_df = pd.read_csv('models/FinBee/loans1-model/pareto_hyperparameters.csv')
+    hyper_row = hyper_df[hyper_df['solID'] == MODEL_ID].iloc[0] if not hyper_df[hyper_df['solID'] == MODEL_ID].empty else None
+    
+    # Build optimization parameters for each channel
+    channels_data = {}
+    active_channels = []
+    
+    for channel in MEDIA_CHANNELS:
+        if channel in raw_period_df.columns and channel in budget_constraints:
+            constraint = budget_constraints[channel]
+            
+            # Get model parameters
+            channel_row = media_df[media_df['rn'] == channel]
+            if channel_row.empty:
+                continue
+                
+            # Get total spend and decomp values for the entire model period
+            total_spend = float(channel_row['total_spend'].iloc[0]) if not channel_row['total_spend'].empty else 0
+            total_decomp = float(channel_row['xDecompAgg'].iloc[0]) if not channel_row['xDecompAgg'].empty else 0
+            
+            # Get additional model data
+            mean_response = float(channel_row['mean_response'].iloc[0]) if 'mean_response' in channel_row and not channel_row['mean_response'].empty else 0
+            mean_spend_adstocked = float(channel_row['mean_spend_adstocked'].iloc[0]) if 'mean_spend_adstocked' in channel_row and not channel_row['mean_spend_adstocked'].empty else 0
+            
+            channel_data = {
+                'name': channel,
+                'current_spend': raw_period_df[channel].sum(),
+                'avg_weekly': raw_period_df[channel].mean(),
+                'min_weekly': constraint['min'],
+                'max_weekly': constraint['max'],
+                'coef': float(channel_row['coef'].iloc[0]) if not channel_row['coef'].empty else 0,
+                'total_spend': total_spend,
+                'total_decomp': total_decomp,
+                'base_roas': total_decomp / total_spend if total_spend > 0 else 0,
+                'mean_response': mean_response,
+                'mean_spend_adstocked': mean_spend_adstocked
+            }
+            
+            # Get hyperparameters
+            if hyper_row is not None:
+                alpha_col = f"{channel}_alphas"
+                gamma_col = f"{channel}_gammas"
+                inflexion_col = f"{channel}_inflexion"
+                scale_col = f"{channel}_scales"
+                shape_col = f"{channel}_shapes"
+                
+                if alpha_col in hyper_row:
+                    channel_data['alpha'] = float(hyper_row[alpha_col])
+                    # Use inflexion if available, otherwise use gamma
+                    if inflexion_col in hyper_row and pd.notna(hyper_row[inflexion_col]):
+                        channel_data['gamma'] = float(hyper_row[inflexion_col])
+                    else:
+                        channel_data['gamma'] = float(hyper_row[gamma_col])
+                if scale_col in hyper_row:
+                    channel_data['scale'] = float(hyper_row[scale_col])
+                    channel_data['shape'] = float(hyper_row[shape_col])
+            
+            channels_data[channel] = channel_data
+            active_channels.append(channel)
+    
+    # Initial spend allocation (current average)
+    x0 = np.array([channels_data[ch]['avg_weekly'] for ch in active_channels])
+    
+    # Bounds for optimization
+    bounds = [(channels_data[ch]['min_weekly'], channels_data[ch]['max_weekly']) for ch in active_channels]
+    
+    # Objective function: maximize total response with efficiency penalty
+    def objective(x):
+        total_response = 0
+        efficiency_penalty = 0
+        
+        for i, channel in enumerate(active_channels):
+            weekly_spend = x[i]
+            ch_data = channels_data[channel]
+            
+            # Calculate response for the weekly spend
+            response = calculate_response(weekly_spend, ch_data)
+            total_response += response
+            
+            # Add penalty for very low saturation (inefficient spend)
+            if 'alpha' in ch_data and 'gamma' in ch_data:
+                adstock_mult = ch_data.get('mean_spend_adstocked', 0) / ch_data.get('avg_weekly', 1)
+                adstocked = weekly_spend * adstock_mult
+                saturation = (adstocked ** ch_data['alpha']) / (adstocked ** ch_data['alpha'] + ch_data['gamma'] ** ch_data['alpha'])
+                
+                # Penalize if saturation is below 5% (too little spend to be effective)
+                if saturation < 0.05:
+                    efficiency_penalty += (0.05 - saturation) * 100000
+        
+        # Return negative for minimization (multiply by weeks for total)
+        return -(total_response * n_weeks) + efficiency_penalty
+    
+    # Run optimization
+    result = minimize(objective, x0, method='SLSQP', bounds=bounds)
+    
+    if not result.success:
+        return jsonify({'error': 'Optimization failed: ' + result.message}), 500
+    
+    # Calculate results
+    optimized_spends = result.x
+    
+    # Prepare results for display
+    initial_results = []
+    optimized_results = []
+    
+    total_initial_spend = 0
+    total_initial_response = 0
+    total_optimized_spend = 0
+    total_optimized_response = 0
+    
+    for i, channel in enumerate(active_channels):
+        ch_data = channels_data[channel]
+        
+        # Initial allocation
+        initial_spend = ch_data['avg_weekly']
+        initial_response = calculate_response(initial_spend, ch_data)
+        
+        # Calculate saturation for initial spend
+        initial_saturation = 0
+        if 'alpha' in ch_data and 'gamma' in ch_data:
+            adstock_mult = ch_data.get('mean_spend_adstocked', 0) / ch_data.get('avg_weekly', 1)
+            adstocked = initial_spend * adstock_mult
+            initial_saturation = (adstocked ** ch_data['alpha']) / (adstocked ** ch_data['alpha'] + ch_data['gamma'] ** ch_data['alpha'])
+        
+        initial_results.append({
+            'channel': channel,
+            'spend': initial_spend * n_weeks,
+            'weekly_spend': initial_spend,
+            'response': initial_response * n_weeks,
+            'response_pct': 0,  # Will calculate after total
+            'spend_pct': 0,
+            'roas': initial_response / initial_spend if initial_spend > 0 else 0,
+            'saturation': initial_saturation * 100
+        })
+        
+        total_initial_spend += initial_spend * n_weeks
+        total_initial_response += initial_response * n_weeks
+        
+        # Optimized allocation
+        opt_spend = optimized_spends[i]
+        opt_response = calculate_response(opt_spend, ch_data)
+        
+        # Calculate saturation for optimized spend
+        opt_saturation = 0
+        if 'alpha' in ch_data and 'gamma' in ch_data:
+            adstock_mult = ch_data.get('mean_spend_adstocked', 0) / ch_data.get('avg_weekly', 1)
+            adstocked = opt_spend * adstock_mult
+            opt_saturation = (adstocked ** ch_data['alpha']) / (adstocked ** ch_data['alpha'] + ch_data['gamma'] ** ch_data['alpha'])
+        
+        optimized_results.append({
+            'channel': channel,
+            'spend': opt_spend * n_weeks,
+            'weekly_spend': opt_spend,
+            'response': opt_response * n_weeks,
+            'response_pct': 0,  # Will calculate after total
+            'spend_pct': 0,
+            'roas': opt_response / opt_spend if opt_spend > 0 else 0,
+            'saturation': opt_saturation * 100
+        })
+        
+        total_optimized_spend += opt_spend * n_weeks
+        total_optimized_response += opt_response * n_weeks
+    
+    # Calculate percentages
+    for res in initial_results:
+        res['spend_pct'] = (res['spend'] / total_initial_spend * 100) if total_initial_spend > 0 else 0
+        res['response_pct'] = (res['response'] / total_initial_response * 100) if total_initial_response > 0 else 0
+    
+    for res in optimized_results:
+        res['spend_pct'] = (res['spend'] / total_optimized_spend * 100) if total_optimized_spend > 0 else 0
+        res['response_pct'] = (res['response'] / total_optimized_response * 100) if total_optimized_response > 0 else 0
+    
+    # Calculate lift
+    spend_change = ((total_optimized_spend - total_initial_spend) / total_initial_spend * 100) if total_initial_spend > 0 else 0
+    response_change = ((total_optimized_response - total_initial_response) / total_initial_response * 100) if total_initial_response > 0 else 0
+    
+    return jsonify({
+        'success': True,
+        'period': {
+            'start': start_date,
+            'end': end_date,
+            'weeks': n_weeks
+        },
+        'initial': {
+            'results': initial_results,
+            'total_spend': total_initial_spend,
+            'total_response': total_initial_response,
+            'total_roas': total_initial_response / total_initial_spend if total_initial_spend > 0 else 0
+        },
+        'optimized': {
+            'results': optimized_results,
+            'total_spend': total_optimized_spend,
+            'total_response': total_optimized_response,
+            'total_roas': total_optimized_response / total_optimized_spend if total_optimized_spend > 0 else 0
+        },
+        'lift': {
+            'spend_change': spend_change,
+            'response_change': response_change
+        }
+    })
+
+def calculate_response(spend, channel_data):
+    """Calculate response for a given spend level using Robyn's transformation pipeline
+    
+    Pipeline: Raw Spend → Adstock → Saturation → Response
+    """
+    
+    if spend <= 0:
+        return 0
+    
+    # Get model parameters
+    coef = channel_data.get('coef', 0)
+    mean_spend = channel_data.get('avg_weekly', 0)
+    mean_spend_adstocked = channel_data.get('mean_spend_adstocked', 0)
+    
+    # Calculate adstock multiplier
+    if mean_spend > 0 and mean_spend_adstocked > 0:
+        adstock_mult = mean_spend_adstocked / mean_spend
+    else:
+        adstock_mult = 1.0
+    
+    # Apply adstock transformation
+    adstocked_spend = spend * adstock_mult
+    
+    # Get saturation parameters
+    alpha = channel_data.get('alpha', 0)
+    gamma = channel_data.get('gamma', 0)  # inflexion point
+    
+    if alpha > 0 and gamma > 0:
+        # Apply Hill saturation
+        saturation = (adstocked_spend ** alpha) / (adstocked_spend ** alpha + gamma ** alpha)
+        
+        # Calculate response
+        response = coef * saturation
+    else:
+        # Fallback to linear scaling if parameters missing
+        mean_response = channel_data.get('mean_response', 0)
+        if mean_spend > 0:
+            response = mean_response * (spend / mean_spend)
+        else:
+            response = 0
+    
+    return response
 
 if __name__ == '__main__':
     app.run(debug=True)
