@@ -33,3 +33,9 @@ Thumbs.db
 *.log
 *.csv.bak
 *.json.bak
+helpers/
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
